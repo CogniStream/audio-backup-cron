@@ -21,6 +21,7 @@ export interface BackupConfig {
   tempDir: string;
   fileExtensions: string[]; // e.g., ['.mp3', '.wav', '.m4a']
   batchSize: number; // Number of files to process in parallel
+  slackWebhookUrl?: string; // Optional Slack webhook URL for notifications
 }
 
 function loadSupabaseConfig(): SupabaseConfig {
@@ -69,6 +70,7 @@ export function loadConfig(): BackupConfig {
     .split(",")
     .map((ext) => ext.trim());
   const batchSize = parseInt(process.env.BATCH_SIZE || "5", 10);
+  const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
 
   return {
     supabase,
@@ -77,5 +79,6 @@ export function loadConfig(): BackupConfig {
     tempDir,
     fileExtensions,
     batchSize,
+    slackWebhookUrl,
   };
 }

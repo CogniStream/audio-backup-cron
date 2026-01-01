@@ -1,6 +1,7 @@
 import { SupabaseStorage, StorageFile } from "./supabase";
 import { S3Uploader } from "./s3";
 import type { BackupConfig } from "./config";
+import { SlackNotifier, type BackupMetrics } from "./slack";
 import { mkdir, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
@@ -8,12 +9,14 @@ import path from "path";
 export class StorageBackup {
   private supabase: SupabaseStorage;
   private s3: S3Uploader;
+  private slack: SlackNotifier;
   private config: BackupConfig;
 
   constructor(config: BackupConfig) {
     this.config = config;
     this.supabase = new SupabaseStorage(config.supabase);
     this.s3 = new S3Uploader(config.s3);
+    this.slack = new SlackNotifier(config.slackWebhookUrl);
   }
 
   async backup(): Promise<void> {
@@ -82,7 +85,8 @@ export class StorageBackup {
       // Clean up temp directory
       await this.cleanupTempDir();
 
-      const duration = Math.round((Date.now() - startTime) / 1000);
+      const endTime = Date.now();
+      const duration = Math.round((endTime - startTime) / 1000);
       console.log("\n" + "=".repeat(60));
       console.log("Backup Summary:");
       console.log(`  Total files: ${allFiles.length}`);
@@ -92,6 +96,19 @@ export class StorageBackup {
       console.log(`  Duration: ${duration} seconds`);
       console.log(`  Total size processed: ${this.formatBytes(totalSize)}`);
       console.log("=".repeat(60) + "\n");
+
+      // Send Slack notification
+      const metrics: BackupMetrics = {
+        totalFiles: allFiles.length,
+        successCount,
+        skipCount,
+        errorCount,
+        duration,
+        totalSize,
+        startTime: new Date(startTime),
+        endTime: new Date(endTime)
+      };
+      await this.slack.sendBackupNotification(metrics);
     } catch (error) {
       console.error("\nBackup failed with error:", error);
       throw error;
