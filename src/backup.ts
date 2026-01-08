@@ -25,68 +25,78 @@ export class StorageBackup {
     console.log(`Starting backup at ${new Date().toLocaleString()}`);
     console.log("=".repeat(60));
 
+    let successCount = 0;
+    let skipCount = 0;
+    let errorCount = 0;
+    let totalSize = 0;
+    let allFiles: StorageFile[] = [];
+    let hadFatalError = false;
+    let fatalError: Error | unknown = null;
+
     try {
       // Ensure temp directory exists
       await this.ensureTempDir();
 
       // Recursively get ALL files from Supabase
-      const allFiles = await this.supabase.listAllFiles();
+      allFiles = await this.supabase.listAllFiles();
 
       if (allFiles.length === 0) {
         console.log("\nNo files found to backup");
-        return;
-      }
+        // Don't return early - we'll send a notification
+      } else {
+        console.log(`\nStarting backup of ${allFiles.length} file(s)...`);
 
-      console.log(`\nStarting backup of ${allFiles.length} file(s)...`);
+        // Calculate total size
+        totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
+        console.log(`Total size to backup: ${this.formatBytes(totalSize)}`);
 
-      let successCount = 0;
-      let skipCount = 0;
-      let errorCount = 0;
+        // Process files in batches
+        for (let i = 0; i < allFiles.length; i += this.config.batchSize) {
+          const batch = allFiles.slice(
+            i,
+            Math.min(i + this.config.batchSize, allFiles.length)
+          );
 
-      // Calculate total size
-      const totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
-      console.log(`Total size to backup: ${this.formatBytes(totalSize)}`);
+          console.log(
+            `\nProcessing batch ${Math.floor(i / this.config.batchSize) + 1} (${
+              batch.length
+            } files):`
+          );
 
-      // Process files in batches
-      for (let i = 0; i < allFiles.length; i += this.config.batchSize) {
-        const batch = allFiles.slice(
-          i,
-          Math.min(i + this.config.batchSize, allFiles.length)
-        );
-
-        console.log(
-          `\nProcessing batch ${Math.floor(i / this.config.batchSize) + 1} (${
-            batch.length
-          } files):`
-        );
-
-        const promises = batch.map(async (file) => {
-          try {
-            await this.backupFile(file);
-            successCount++;
-            return { success: true };
-          } catch (error) {
-            if (
-              error instanceof Error &&
-              error.message.includes("already exists")
-            ) {
-              skipCount++;
-              return { skip: true };
+          const promises = batch.map(async (file) => {
+            try {
+              await this.backupFile(file);
+              successCount++;
+              return { success: true };
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.message.includes("already exists")
+              ) {
+                skipCount++;
+                return { skip: true };
+              }
+              errorCount++;
+              console.error(`  ✗ Error backing up ${file.path}:`, error);
+              return { error: true };
             }
-            errorCount++;
-            console.error(`  ✗ Error backing up ${file.path}:`, error);
-            return { error: true };
-          }
-        });
+          });
 
-        await Promise.all(promises);
+          await Promise.all(promises);
+        }
+
+        // Clean up temp directory
+        await this.cleanupTempDir();
       }
-
-      // Clean up temp directory
-      await this.cleanupTempDir();
-
+    } catch (error) {
+      console.error("\nBackup failed with error:", error);
+      hadFatalError = true;
+      fatalError = error;
+    } finally {
+      // Always send a notification, regardless of outcome
       const endTime = Date.now();
       const duration = Math.round((endTime - startTime) / 1000);
+
       console.log("\n" + "=".repeat(60));
       console.log("Backup Summary:");
       console.log(`  Total files: ${allFiles.length}`);
@@ -97,21 +107,32 @@ export class StorageBackup {
       console.log(`  Total size processed: ${this.formatBytes(totalSize)}`);
       console.log("=".repeat(60) + "\n");
 
-      // Send Slack notification
-      const metrics: BackupMetrics = {
-        totalFiles: allFiles.length,
-        successCount,
-        skipCount,
-        errorCount,
-        duration,
-        totalSize,
-        startTime: new Date(startTime),
-        endTime: new Date(endTime)
-      };
-      await this.slack.sendBackupNotification(metrics);
-    } catch (error) {
-      console.error("\nBackup failed with error:", error);
-      throw error;
+      // Send appropriate notification
+      if (hadFatalError) {
+        // Send error notification for fatal errors
+        await this.slack.sendErrorNotification(
+          fatalError,
+          "Fatal error occurred during backup process"
+        );
+      } else {
+        // Send regular notification with metrics
+        const metrics: BackupMetrics = {
+          totalFiles: allFiles.length,
+          successCount,
+          skipCount,
+          errorCount,
+          duration,
+          totalSize,
+          startTime: new Date(startTime),
+          endTime: new Date(endTime)
+        };
+        await this.slack.sendBackupNotification(metrics);
+      }
+
+      // Throw the error after notification is sent
+      if (hadFatalError) {
+        throw fatalError;
+      }
     }
   }
 

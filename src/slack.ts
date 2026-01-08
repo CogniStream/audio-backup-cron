@@ -56,6 +56,73 @@ export class SlackNotifier {
   }
 
   /**
+   * Send an error notification to Slack
+   */
+  async sendErrorNotification(error: Error | unknown, context?: string): Promise<void> {
+    if (!this.webhookUrl) {
+      console.log("Slack webhook URL not configured, skipping notification");
+      return;
+    }
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
+    const message: SlackMessage = {
+      text: "Supabase Storage Backup - Error",
+      blocks: [
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: "Supabase Storage Backup ❌"
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Backup Status:* Failed`
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Error:* ${errorMessage}`
+          }
+        }
+      ]
+    };
+
+    if (context) {
+      message.blocks?.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Context:* ${context}`
+        }
+      });
+    }
+
+    if (errorStack) {
+      message.blocks?.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*Stack Trace:*\n\`\`\`${errorStack.substring(0, 500)}\`\`\``
+        }
+      });
+    }
+
+    try {
+      await this.sendMessage(message);
+      console.log("Slack error notification sent successfully");
+    } catch (error) {
+      console.error("Failed to send Slack error notification:", error);
+    }
+  }
+
+  /**
    * Build a formatted Slack message from backup metrics
    */
   private buildBackupMessage(metrics: BackupMetrics): SlackMessage {
