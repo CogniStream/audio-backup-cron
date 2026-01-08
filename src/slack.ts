@@ -126,8 +126,22 @@ export class SlackNotifier {
    * Build a formatted Slack message from backup metrics
    */
   private buildBackupMessage(metrics: BackupMetrics): SlackMessage {
-    const status = metrics.errorCount === 0 ? "Success" : "Completed with errors";
-    const statusEmoji = metrics.errorCount === 0 ? "✅" : "⚠️";
+    let status: string;
+    let statusEmoji: string;
+
+    if (metrics.totalFiles === 0) {
+      status = "No files found";
+      statusEmoji = "ℹ️";
+    } else if (metrics.successCount === 0 && metrics.skipCount === metrics.totalFiles) {
+      status = "All files already backed up";
+      statusEmoji = "✅";
+    } else if (metrics.errorCount === 0) {
+      status = "Success";
+      statusEmoji = "✅";
+    } else {
+      status = "Completed with errors";
+      statusEmoji = "⚠️";
+    }
 
     // Format dates
     const startTimeStr = metrics.startTime.toLocaleString();

@@ -108,6 +108,7 @@ export class StorageBackup {
       console.log("=".repeat(60) + "\n");
 
       // Send appropriate notification
+      console.log("Sending Slack notification...");
       if (hadFatalError) {
         // Send error notification for fatal errors
         await this.slack.sendErrorNotification(
@@ -128,6 +129,7 @@ export class StorageBackup {
         };
         await this.slack.sendBackupNotification(metrics);
       }
+      console.log("Slack notification process completed.");
 
       // Throw the error after notification is sent
       if (hadFatalError) {
