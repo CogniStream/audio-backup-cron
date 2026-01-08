@@ -20,6 +20,11 @@ export class S3Uploader {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
       },
+      requestHandler: {
+        requestTimeout: 30000, // 30 seconds timeout for requests
+        connectionTimeout: 5000, // 5 seconds to establish connection
+      },
+      maxAttempts: 3, // Retry failed requests up to 3 times
     });
     this.bucketName = config.bucketName;
     this.prefix = config.prefix;
@@ -106,10 +111,22 @@ export class S3Uploader {
         MaxKeys: 1,
       });
 
-      const response = await this.client.send(command);
+      // Add timeout wrapper to prevent hanging
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('fileExists timeout after 15s')), 15000);
+      });
+
+      const sendPromise = this.client.send(command);
+      const response = await Promise.race([sendPromise, timeout]);
       return (response.Contents?.length ?? 0) > 0;
     } catch (error) {
-      console.error(`Error checking if file exists in S3: ${filePath}`, error);
+      if (error instanceof Error && error.message.includes('timeout')) {
+        console.error(`  ! Timeout checking if file exists in S3: ${filePath}`);
+      } else {
+        console.error(`  ! Error checking if file exists in S3: ${filePath}`, error);
+      }
+      // Return false on error/timeout so the backup will attempt to upload
+      // (S3 will handle duplicate uploads gracefully)
       return false;
     }
   }

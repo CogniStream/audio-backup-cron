@@ -133,23 +133,36 @@ export class SupabaseStorage {
 
   async downloadFile(filePath: string): Promise<Buffer> {
     try {
-      const { data, error } = await this.client.storage
-        .from(this.bucketName)
-        .download(filePath);
+      // Add timeout wrapper to prevent hanging downloads
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Download timeout after 60s')), 60000);
+      });
 
-      if (error) {
-        throw error;
-      }
+      const downloadPromise = (async () => {
+        const { data, error } = await this.client.storage
+          .from(this.bucketName)
+          .download(filePath);
 
-      if (!data) {
-        throw new Error(`No data returned for file: ${filePath}`);
-      }
+        if (error) {
+          throw error;
+        }
 
-      // Convert Blob to Buffer
-      const arrayBuffer = await data.arrayBuffer();
-      return Buffer.from(arrayBuffer);
+        if (!data) {
+          throw new Error(`No data returned for file: ${filePath}`);
+        }
+
+        // Convert Blob to Buffer
+        const arrayBuffer = await data.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      })();
+
+      return await Promise.race([downloadPromise, timeout]);
     } catch (error) {
-      console.error(`Error downloading file ${filePath}:`, error);
+      if (error instanceof Error && error.message.includes('timeout')) {
+        console.error(`  ! Timeout downloading file ${filePath} after 60s`);
+      } else {
+        console.error(`  ! Error downloading file ${filePath}:`, error);
+      }
       throw error;
     }
   }

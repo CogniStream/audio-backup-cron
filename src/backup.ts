@@ -57,10 +57,12 @@ export class StorageBackup {
             Math.min(i + this.config.batchSize, allFiles.length)
           );
 
+          const batchNumber = Math.floor(i / this.config.batchSize) + 1;
+          const totalBatches = Math.ceil(allFiles.length / this.config.batchSize);
+          const progress = Math.round((i / allFiles.length) * 100);
+
           console.log(
-            `\nProcessing batch ${Math.floor(i / this.config.batchSize) + 1} (${
-              batch.length
-            } files):`
+            `\nProcessing batch ${batchNumber}/${totalBatches} (${progress}% complete, ${batch.length} files):`
           );
 
           const promises = batch.map(async (file) => {
@@ -82,7 +84,30 @@ export class StorageBackup {
             }
           });
 
-          await Promise.all(promises);
+          // Add timeout wrapper for the entire batch
+          const batchTimeout = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Batch ${batchNumber} timeout after 120s`)), 120000);
+          });
+
+          try {
+            await Promise.race([Promise.all(promises), batchTimeout]);
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('timeout')) {
+              console.error(`  ✗ ${error.message} - batch may be hanging`);
+              errorCount += batch.length;
+              // Continue to next batch instead of failing completely
+            } else {
+              throw error;
+            }
+          }
+
+          // Log batch completion as heartbeat
+          console.log(`  ✓ Batch ${batchNumber} completed (Success: ${successCount}, Skipped: ${skipCount}, Errors: ${errorCount})`);
+
+          // Add small delay between batches to reduce API pressure
+          if (i + this.config.batchSize < allFiles.length) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
         }
 
         // Clean up temp directory
